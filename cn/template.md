@@ -62,7 +62,7 @@ package handler
 
 import (
 	"net/http"
-	"greet/response"// ①
+	"greet/reponse"// ①
 
 	{{.ImportPackages}}
 )
