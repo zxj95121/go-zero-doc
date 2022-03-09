@@ -4,31 +4,25 @@
 
 所以当你存在以下需求，都可以使用这个组件：
 
-- 批量提交任务
-- 缓冲一部分任务，惰性提交
-- 延迟任务提交
+* 批量提交任务
+* 缓冲一部分任务，惰性提交
+* 延迟任务提交
 
+具体解释之前，先给一个大致的概览图： ![c42c34e8d33d48ec8a63e56feeae882a](resource/c42c34e8d33d48ec8a63e56feeae882a.png)
 
-
-具体解释之前，先给一个大致的概览图：
-![c42c34e8d33d48ec8a63e56feeae882a](./resource/c42c34e8d33d48ec8a63e56feeae882a.png)
 ## 接口设计
-
 
 在 `executors` 包下，有如下几个 `executor` ：
 
-| Name | Margin value |
-| --- | --- |
-| `bulkexecutor` | 达到 `maxTasks` 【最大任务数】 提交 |
-| `chunkexecutor` | 达到 `maxChunkSize`【最大字节数】提交 |
-| `periodicalexecutor` | `basic executor` |
-| `delayexecutor` | 延迟执行传入的 `fn()` |
-| `lessexecutor` |  |
-
-
+| Name                 | Margin value               |
+| -------------------- | -------------------------- |
+| `bulkexecutor`       | 达到 `maxTasks` 【最大任务数】 提交   |
+| `chunkexecutor`      | 达到 `maxChunkSize`【最大字节数】提交 |
+| `periodicalexecutor` | `basic executor`           |
+| `delayexecutor`      | 延迟执行传入的 `fn()`             |
+| `lessexecutor`       |                            |
 
 你会看到除了有特殊功能的的 `delay`，`less` ，其余3个都是 `executor` + `container` 的组合设计：
-
 
 ```go
 func NewBulkExecutor(execute Execute, opts ...BulkOption) *BulkExecutor {
@@ -53,9 +47,7 @@ func NewBulkExecutor(execute Execute, opts ...BulkOption) *BulkExecutor {
 }
 ```
 
-
 而这个 `container`是个 `interface`：
-
 
 ```go
 TaskContainer interface {
@@ -68,27 +60,20 @@ TaskContainer interface {
 }
 ```
 
-
 由此可见之间的依赖关系：
 
+* `bulkexecutor`：`periodicalexecutor` + `bulkContainer`
+* `chunkexecutor`：`periodicalexecutor` + `chunkContainer`
 
-- `bulkexecutor`：`periodicalexecutor` + `bulkContainer`
-- `chunkexecutor`：`periodicalexecutor` + `chunkContainer`
-
-
-> [!TIP]
-> 所以你想完成自己的 `executor`，可以实现 `container` 的这3个接口，再结合 `periodicalexecutor` 就行
+> \[!TIP] 所以你想完成自己的 `executor`，可以实现 `container` 的这3个接口，再结合 `periodicalexecutor` 就行
 
 所以回到👆那张图，我们的重点就放在 `periodicalexecutor`，看看它是怎么设计的？
 
-
 ## 如何使用
-
 
 首先看看如何在业务中使用这个组件：
 
 现有一个定时服务，每天固定时间去执行从 `mysql` 到 `clickhouse` 的数据同步：
-
 
 ```go
 type DailyTask struct {
@@ -97,7 +82,6 @@ type DailyTask struct {
 	mysqlConn      sqlx.SqlConn
 }
 ```
-
 
 初始化 `bulkExecutor`：
 
@@ -112,12 +96,9 @@ func (dts *DailyTask) Init() {
 }
 ```
 
-> [!TIP]
-> 额外介绍一下：`clickhouse`  适合大批量的插入，因为insert速度很快，大批量insert更能充分利用clickhouse
-
+> \[!TIP] 额外介绍一下：`clickhouse`  适合大批量的插入，因为insert速度很快，大批量insert更能充分利用clickhouse
 
 主体业务逻辑编写：
-
 
 ```go
 func (dts *DailyTask) insertNewData(ch chan interface{}, sqlFromDb *model.Task) error {
@@ -146,24 +127,17 @@ func (dts *DailyTask) insertNewData(ch chan interface{}, sqlFromDb *model.Task) 
 }
 ```
 
-> [!TIP]
-> 可能会疑惑为什么要 `Flush(), Wait()` ，后面会通过源码解析一下
+> \[!TIP] 可能会疑惑为什么要 `Flush(), Wait()` ，后面会通过源码解析一下
 
 使用上总体上3步：
 
-
-- `Add()`：加入task
-- `Flush()`：刷新 `container` 中的task
-- `Wait()`：等待全部的task执行完成
-
-
+* `Add()`：加入task
+* `Flush()`：刷新 `container` 中的task
+* `Wait()`：等待全部的task执行完成
 
 ## 源码分析
 
-> [!TIP]
-> 此处主要分析 `periodicalexecutor`，因为其他两个常用的 `executor` 都依赖它
-
-
+> \[!TIP] 此处主要分析 `periodicalexecutor`，因为其他两个常用的 `executor` 都依赖它
 
 ### 初始化
 
@@ -183,15 +157,13 @@ func New...(interval time.Duration, container TaskContainer) *PeriodicalExecutor
 }
 ```
 
-
-- `commander`：传递 `tasks` 的 channel
-- `container`：暂存 `Add()` 的 task
-- `confirmChan`：阻塞 `Add()` ，在开始本次的 `executeTasks()` 会放开阻塞
-- `ticker`：定时器，防止 `Add()` 阻塞时，会有一个定时执行的机会，及时释放暂存的task
-
-
+* `commander`：传递 `tasks` 的 channel
+* `container`：暂存 `Add()` 的 task
+* `confirmChan`：阻塞 `Add()` ，在开始本次的 `executeTasks()` 会放开阻塞
+* `ticker`：定时器，防止 `Add()` 阻塞时，会有一个定时执行的机会，及时释放暂存的task
 
 ### Add()
+
 初始化完，在业务逻辑的第一步就是把 task 加入 `executor`：
 
 ```go
@@ -230,6 +202,7 @@ func (pe *PeriodicalExecutor) addAndCheck(task interface{}) (interface{}, bool) 
 `addAndCheck()` 中 `AddTask()` 就是在控制最大 tasks 数，如果超过就执行 `RemoveAll()` ，将暂存 `container` 的tasks pop，传递给 `commander` ，后面有goroutine循环读取，然后去执行 tasks。
 
 ### backgroundFlush()
+
 开启一个后台协程，对 `container` 中的task，不断刷新：
 
 ```go
@@ -277,10 +250,11 @@ func (pe *PeriodicalExecutor) backgroundFlush() {
 
 总体两个过程：
 
-- `commander` 接收到 `RemoveAll()` 传递来的tasks，然后做执行，并放开 `Add()` 的阻塞，得以继续 `Add()`
-- `ticker` 到时间了，如果第一步没有执行，则自动 `Flush()` ，也会去做task的执行
+* `commander` 接收到 `RemoveAll()` 传递来的tasks，然后做执行，并放开 `Add()` 的阻塞，得以继续 `Add()`
+* `ticker` 到时间了，如果第一步没有执行，则自动 `Flush()` ，也会去做task的执行
 
 ### Wait()
+
 在 `backgroundFlush()` ，提到一个函数：`enterExecution()`：
 
 ```go
@@ -296,30 +270,31 @@ func (pe *PeriodicalExecutor) Wait() {
 	})
 }
 ```
+
 这样列举就知道为什么之前为什么在最后要带上 `dts.insertExecutor.Wait()`，当然要等待全部的 `goroutine task` 完成。
 
 ## 思考
+
 在看源码中，思考了一些其他设计上的思路，大家是否也有类似的问题：
 
-- 在分析 `executors` 中，会发现很多地方都有 `lock`
+* 在分析 `executors` 中，会发现很多地方都有 `lock`
 
-> [!TIP]
-> `go test` 存在竞态，使用加锁来避免这种情况
+> \[!TIP] `go test` 存在竞态，使用加锁来避免这种情况
 
-- 在分析 `confirmChan` 发现，在此次[提交](https://github.com/tal-tech/go-zero/commit/9d9399ad1014c171cc9bd9c87f78b5d2ac238ce4)才出现，为什么会这么设计？
+* 在分析 `confirmChan` 发现，在此次[提交](https://github.com/tal-tech/go-zero/commit/9d9399ad1014c171cc9bd9c87f78b5d2ac238ce4)才出现，为什么会这么设计？
 
-> 之前是：`wg.Add(1)` 是写在 `executeTasks()` ；现在是：先`wg.Add(1)`，再放开 `confirmChan` 阻塞
-> 如果 `executor func` 执行阻塞，`Add task` 还在进行，因为没有阻塞，可能很快执行到 `Executor.Wait()`，这是就会出现 `wg.Wait()` 在 `wg.Add()` 前执行，这会 `panic`
+> 之前是：`wg.Add(1)` 是写在 `executeTasks()` ；现在是：先`wg.Add(1)`，再放开 `confirmChan` 阻塞 如果 `executor func` 执行阻塞，`Add task` 还在进行，因为没有阻塞，可能很快执行到 `Executor.Wait()`，这是就会出现 `wg.Wait()` 在 `wg.Add()` 前执行，这会 `panic`
 
 具体可以看最新版本的`TestPeriodicalExecutor_WaitFast()` ，不妨跑在此版本上，就可以重现
 
 ## 总结
+
 剩余还有几个 `executors` 的分析，就留给大家去看看源码。
 
 总之，整体设计上：
 
-- 遵循面向接口设计
-- 灵活使用 `channel` ，`waitgroup` 等并发工具
-- 执行单元+存储单元的搭配使用
+* 遵循面向接口设计
+* 灵活使用 `channel` ，`waitgroup` 等并发工具
+* 执行单元+存储单元的搭配使用
 
 在 `go-zero` 中还有很多实用的组件工具，用好工具对于提升服务性能和开发效率都有很大的帮助，希望本篇文章能给大家带来一些收获。
